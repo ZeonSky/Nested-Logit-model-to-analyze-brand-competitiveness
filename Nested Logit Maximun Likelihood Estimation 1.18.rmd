@@ -1,0 +1,227 @@
+---
+title: "Otto 1.18"
+author: "Andy (Zhiheng) Zhou"
+date: "January 16, 2018"
+output: word_document
+---
+
+```{r setup, include=TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+require(readr)
+require(maxLik)
+```
+Huge Function to Calculate Sum of LL:
+
+
+#Construction of data, parameter vectors, Likelihood matrix.
+#Reconstruct parameter vector for the ease of calculation.
+#Split rows of data and parameters into 5 categories.
+
+```{r read_data}
+setwd("C:/Coding Station/R docs/SP R")
+sales <- as.matrix(read_csv("C:/Coding Station/R docs/SP R/sales.csv"))
+adv <- as.matrix(read_csv("C:/Coding Station/R docs/SP R/adv.csv"))
+noPur <- as.matrix(read_csv("C:/Coding Station/R docs/SP R/noPur.csv", col_names = FALSE))
+LL=matrix(0,nrow=41,ncol=51,dimnames=list(j=seq(1:41),month=seq(1:51)))
+SumLL=0
+
+## Function to split rows of sales and adv data into 5 categories
+splitCat<-function(data){
+  Data=list()
+  Data[[1]]<-data[c(1:3),]
+  Data[[2]]<-data[c(4:11),]
+  Data[[3]]<-data[c(12:26),]
+  Data[[4]]<-data[c(27:35),]
+  Data[[5]]<-data[c(36:40),]
+  Data
+}
+
+ADV<-splitCat(adv)
+SALES<-splitCat(sales)
+
+```
+
+```{r Log-Likelihood Function}
+llf <- function(para){
+  
+  ## Brand intrinsic attractiveness within category
+  alpha=c(0,para[1:2],0,para[3:9],0,para[10:23],0,para[24:31],0,para[32:35]) # alpha[1]=alpha[4]=alpha[12]=alpha[27]=alpha[36]=0
+  names(alpha)<-paste0("alpha",seq(1,40))
+  ## Effectiveness of advertisement of each brand
+  beta=para[36:40]
+  names(beta)<-paste("beta",LETTERS[1:5])
+  ## Category intrinsic attractiveness
+  A=para[41:45]
+  names(A)<-paste("A",LETTERS[1:5])
+  ## Effectiveness of category attractiveness
+  r=para[46:50]
+  names(r)<-paste("r",LETTERS[1:5])
+  
+  ## Renaming the aggregate parameter vector
+  names(para) = c(names(alpha)[-c(1,4,12,27,36)],names(beta),names(A),names(r))
+  
+  
+  splitVec<-function(vec){
+    VEC=list()
+    VEC[[1]]<-vec[1:3]
+    VEC[[2]]<-vec[4:11]
+    VEC[[3]]<-vec[12:26]
+    VEC[[4]]<-vec[27:35]
+    VEC[[5]]<-vec[36:40]
+    VEC
+  }
+  
+  ALPHA<-splitVec(alpha)
+  
+  # List of 5 matrixes of linear form of brand attractiveness within category (Purchased)
+  V=list()
+  # List of 5 matrixes of Logit of above (Purchased)
+  expV=list()
+  # List of 5 matrixes of Indicator of whether there is sales
+  I=list()
+  # Product of expV and I
+  expVI=list()
+  
+  for (i in 1:5){
+    V[[i]]=ALPHA[[i]]+beta[i]*ADV[[i]]
+    expV[[i]]=exp(V[[i]])
+    I[[i]]=ifelse(SALES[[i]] == 1,0,1)
+    expVI[[i]]=expV[[i]]*I[[i]]
+  }
+  
+  #par(mfrow=c(2,3))
+  #lapply(expVI,boxplot)
+  
+  # Sum of logit among category across 51 months (Purchased)
+  
+  sumLogitI<-lapply(expVI,colSums)
+  
+  # List of 5 matrixes: Probability for each "cell" to happen
+  
+  #dim(expVI[[3]])
+  #test=expVI[[3]]/sumLogitI[[3]]
+  #test
+  
+  PbrandI=list()
+  for (i in 1:6){
+    if (i<6){
+      PbrandI[[i]]=expVI[[i]]/sumLogitI[[i]]
+    } else {
+      PbrandI[[i]]=rep(1,51)
+    }
+  }
+  
+  PCat=list()
+  for (i in 1:6){
+    if (i<6) {
+      PCat[[i]]=expVCat[[i]]/(sumLogitCat+1)
+    } else  {
+      PCat[[i]]=1/(sumLogitCat+1)
+    }
+  }
+  
+  
+  # Category level
+  
+  ## Category attractiveness
+  
+  Attr1=sumLogitI # Use sum of logit as category attractiveness
+  Attr2=lapply(ADV,colSums) # Use sum of advertisement as category attractiveness
+  
+  lapply(Attr1,length)
+  
+  # List of 5 matrixes of linear form of category attractiveness within whole industry (Purchased/ Nonpurchase as 0)
+  VCat=list()
+  # List of 5 matrixes of Logit of above (Purchased/ Nonpurchase as 1)
+  expVCat=list()
+  
+  for (i in 1:5){
+    VCat[[i]]=A[i]+r[i]*Attr1[[i]]
+    expVCat[[i]]=exp(VCat[[i]])
+  }
+  
+  #expVCat
+  #lapply(expVCat,length)
+  
+  sumLogitCat = Reduce(`+`,expVCat)
+  #lapply(expVCat,length)
+  
+  #Testing the Correctness of above
+  #s=0
+  #for (i in 1:5){
+  #  s=s+expVCat[[i]][1]
+  #  print(s)
+  #}
+  
+  PCat=list()
+  for (i in 1:6){
+    if (i<6) {
+      PCat[[i]]=expVCat[[i]]/(sumLogitCat+1)
+    } else  {
+      PCat[[i]]=1/(sumLogitCat+1)
+    }
+  }
+  
+  
+  #lapply(PbrandI,dim)
+  #lapply(PCat,length)
+  
+  
+  # Calculate final probability list of 5 matrixes and 1 vector
+  
+  P=list()
+  for (i in 1:6){
+    P[[i]]=PbrandI[[i]]*PCat[[i]]
+  }
+  
+  #Testing:
+  #(PbrandI[[2]]*PCat[[2]])[6,37]
+  #(P[[2]])[6,37]
+  
+  #(PbrandI[[6]]*PCat[[6]])[37]
+  #(P[[6]])[37]
+  
+  SalesNopur=c(SALES,list(noPur))
+  
+  #plot(LnPAll)
+  
+  LnPAll=list()
+  LLAll=list()
+  
+  for (i in 1:6){
+    LnPAll[[i]]=log(P[[i]]+exp(-300))
+    LLAll[[i]]=LnPAll[[i]]*SalesNopur[[i]]
+  }
+  
+  SumLL=sum(unlist(LLAll))
+  
+  return(SumLL)
+}
+
+##########
+
+```
+
+```{r Max Likelihood Estimation}
+
+  paras=rnorm(50, 0.00002123, 0.001)
+  ## Brand intrinsic attractiveness within category
+  alphas=c(0,paras[1:2],0,paras[3:9],0,paras[10:23],0,paras[24:31],0,paras[32:35]) # alpha[1]=alpha[4]=alpha[12]=alpha[27]=alpha[36]=0
+  names(alphas)<-paste0("alpha",seq(1,40))
+  ## Effectiveness of advertisement of each brand
+  betas=paras[36:40]
+  names(betas)<-paste("beta",LETTERS[1:5])
+  ## Category intrinsic attractiveness
+  As=paras[41:45]
+  names(As)<-paste("A",LETTERS[1:5])
+  ## Effectiveness of category attractiveness
+  rs=paras[46:50]
+  names(rs)<-paste("r",LETTERS[1:5])
+  ## Renaming the aggregate parameter vector
+  names(paras) = c(names(alphas)[-c(1,4,12,27,36)],names(betas),names(As),names(rs))
+  
+  MLE<-maxLik(llf,start=paras)
+  
+  print(summary(MLE))
+  
+```
